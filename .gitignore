@@ -1,0 +1,55 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/uploads/
+*.log
+
+# Node.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+backend/test_*.py
+backend/check_*.py
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
