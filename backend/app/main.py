@@ -384,6 +384,13 @@ async def analyze_all_vendor_documents(
         full_document_texts=full_document_texts
     )
 
+    # Update vendor's risk score in Airtable
+    airtable_service.update_vendor_risk(
+        vendor_id=vendor_id,
+        risk_score=comprehensive_result.overall_risk_score,
+        risk_level=comprehensive_result.overall_risk_level.value
+    )
+
     # Log security event
     log_security_event(
         "comprehensive_analysis",

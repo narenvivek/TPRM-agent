@@ -96,3 +96,29 @@ class AirtableService:
             # and CORS headers are preserved.
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail=f"Airtable Error: {str(e)}")
+
+    def update_vendor_risk(self, vendor_id: str, risk_score: int, risk_level: str) -> Dict[str, Any]:
+        """Update vendor's risk score and risk level after comprehensive analysis"""
+        if not self.table:
+            # Mock mode - just return success
+            return {
+                "id": vendor_id,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "last_assessed": "2025-11-21"
+            }
+
+        try:
+            from datetime import datetime
+            # Update the vendor record with new risk assessment
+            updated_fields = {
+                "Risk Score": risk_score,
+                "Risk Level": risk_level,
+                "Last Assessed": datetime.now().strftime("%Y-%m-%d")
+            }
+            record = self.table.update(vendor_id, updated_fields)
+            return self._map_record_to_vendor(record)
+        except Exception as e:
+            print(f"Error updating vendor risk: {e}")
+            # Non-fatal - log but don't fail the analysis
+            return None
