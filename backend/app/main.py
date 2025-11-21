@@ -414,3 +414,24 @@ async def analyze_all_vendor_documents(
     )
 
     return comprehensive_result
+
+@app.get("/vendors/{vendor_id}/assessments/latest")
+async def get_latest_assessment(
+    vendor_id: str,
+    assessment_storage: AssessmentStorageService = Depends(get_assessment_storage)
+):
+    """
+    Get the most recent comprehensive assessment for a vendor
+
+    Returns:
+        Latest assessment dict or 404 if no assessments found
+    """
+    assessment = assessment_storage.get_latest_assessment(vendor_id)
+
+    if not assessment:
+        raise HTTPException(
+            status_code=404,
+            detail="No assessments found for this vendor"
+        )
+
+    return assessment

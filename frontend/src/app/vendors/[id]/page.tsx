@@ -85,10 +85,26 @@ export default function VendorDetailsPage() {
         }
     };
 
+    const fetchLatestAssessment = async () => {
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const res = await fetch(`${apiUrl}/vendors/${id}/assessments/latest`);
+            if (res.ok) {
+                const data = await res.json();
+                setComprehensiveAnalysis(data);
+            } else if (res.status === 404) {
+                // No assessment yet - this is normal
+                setComprehensiveAnalysis(null);
+            }
+        } catch (error) {
+            console.error("Failed to fetch latest assessment", error);
+        }
+    };
+
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
-            await Promise.all([fetchVendor(), fetchDocuments()]);
+            await Promise.all([fetchVendor(), fetchDocuments(), fetchLatestAssessment()]);
             setLoading(false);
         };
         loadData();
