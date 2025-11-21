@@ -287,13 +287,6 @@ export default function VendorDetailsPage() {
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                                        doc.analysis_status === 'Completed'
-                                                            ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                                                            : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
-                                                    }`}>
-                                                        {doc.analysis_status}
-                                                    </span>
                                                     <a
                                                         href={doc.file_url}
                                                         target="_blank"
@@ -304,29 +297,6 @@ export default function VendorDetailsPage() {
                                                     </a>
                                                 </div>
                                             </div>
-
-                                            {doc.analysis_status !== 'Completed' && (
-                                                <div className="mt-4">
-                                                    <Button
-                                                        onClick={() => handleAnalyzeDocument(doc.id)}
-                                                        disabled={analyzingId === doc.id}
-                                                        size="sm"
-                                                        className="w-full"
-                                                    >
-                                                        {analyzingId === doc.id ? (
-                                                            <>
-                                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                                Analyzing...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <ShieldAlert className="mr-2 h-4 w-4" />
-                                                                Analyze with AI
-                                                            </>
-                                                        )}
-                                                    </Button>
-                                                </div>
-                                            )}
 
                                             {doc.analysis_status === 'Completed' && doc.findings && (
                                                 <div className="mt-4 p-4 rounded-lg bg-slate-800/50 border border-slate-700">
