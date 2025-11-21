@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Application
     APP_NAME: str = "TPRM Agent API"
-    APP_VERSION: str = "1.1.0"
+    APP_VERSION: str = "1.2.0"
     ENVIRONMENT: str = Field(default="development", env="ENVIRONMENT")
     DEBUG: bool = Field(default=False, env="DEBUG")
 

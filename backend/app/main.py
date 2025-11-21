@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from typing import List
 from pathlib import Path
-from app.models import Vendor, VendorCreate, AnalysisRequest, AnalysisResult, Document
+from app.models import Vendor, VendorCreate, AnalysisRequest, AnalysisResult, Document, ComprehensiveAnalysisResult
 from app.services.airtable_service import AirtableService
 from app.services.ai_service import AIService
 from app.services.document_service import DocumentService
@@ -268,3 +268,134 @@ async def serve_file(vendor_id: str, filename: str):
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(file_path)
+
+@app.post("/vendors/{vendor_id}/analyze-all", response_model=ComprehensiveAnalysisResult)
+@limiter.limit("3/hour")  # Max 3 comprehensive analyses per hour (expensive operation)
+async def analyze_all_vendor_documents(
+    request: Request,
+    vendor_id: str,
+    airtable_service: AirtableService = Depends(get_airtable_service),
+    doc_service: DocumentAirtableService = Depends(get_document_service),
+    ai_service: AIService = Depends(get_ai_service)
+):
+    """
+    Perform comprehensive cross-document analysis for all vendor documents
+
+    This endpoint:
+    1. Retrieves all documents for the vendor
+    2. Extracts text from each document
+    3. Uses individual analyses if available
+    4. Performs cross-document synthesis with AI
+    5. Provides Go/No-Go decision recommendation
+
+    Rate limit: 3 analyses per hour (computationally expensive)
+    Performance target: <30s for 5 documents
+    """
+    # Get vendor information
+    vendors = airtable_service.get_vendors()
+    vendor = next((v for v in vendors if v.get('id') == vendor_id), None)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    # Get all documents for vendor
+    documents = doc_service.get_vendor_documents(vendor_id)
+
+    if not documents:
+        raise HTTPException(
+            status_code=400,
+            detail="No documents found for this vendor. Please upload documents first."
+        )
+
+    if len(documents) > 20:
+        raise HTTPException(
+            status_code=400,
+            detail="Too many documents (max 20 for comprehensive analysis)"
+        )
+
+    storage = get_storage_service()
+    individual_analyses = []
+    full_document_texts = []
+
+    # Process each document
+    for document in documents:
+        try:
+            # Get file from storage
+            file_path = await storage.get_file_path(document.get("file_url"))
+
+            # Extract text
+            with open(file_path, 'rb') as f:
+                content = f.read()
+
+            class MockUploadFile:
+                def __init__(self, filename, content):
+                    self.filename = filename
+                    self.content = content
+                async def read(self):
+                    return self.content
+
+            mock_file = MockUploadFile(document.get("filename"), content)
+            text_content = await DocumentService.extract_text(mock_file)
+
+            # Store full text for AI analysis
+            full_document_texts.append({
+                'filename': document.get("filename"),
+                'text': text_content
+            })
+
+            # Use existing analysis if available, otherwise create summary
+            if document.get("analysis_status") == "Completed" and document.get("risk_score"):
+                individual_analyses.append({
+                    'filename': document.get("filename"),
+                    'document_type': document.get("document_type"),
+                    'risk_score': document.get("risk_score"),
+                    'risk_level': document.get("risk_level"),
+                    'findings': document.get("findings", []),
+                    'recommendations': document.get("recommendations", [])
+                })
+            else:
+                # Quick analysis for unanalyzed documents
+                quick_analysis = await ai_service.analyze_text(text_content[:5000])
+                individual_analyses.append({
+                    'filename': document.get("filename"),
+                    'document_type': document.get("document_type"),
+                    'risk_score': quick_analysis.risk_score,
+                    'risk_level': quick_analysis.risk_level.value,
+                    'findings': quick_analysis.findings,
+                    'recommendations': quick_analysis.recommendations
+                })
+
+        except Exception as e:
+            print(f"Error processing document {document.get('filename')}: {e}")
+            # Add placeholder for failed document
+            individual_analyses.append({
+                'filename': document.get("filename"),
+                'document_type': document.get("document_type", "Unknown"),
+                'risk_score': 50,
+                'risk_level': "Medium",
+                'findings': [f"Error extracting document: {str(e)}"],
+                'recommendations': ["Manual review required"]
+            })
+
+    # Perform comprehensive analysis
+    comprehensive_result = await ai_service.analyze_all_documents(
+        vendor_id=vendor_id,
+        vendor_name=vendor.get('name', 'Unknown'),
+        individual_analyses=individual_analyses,
+        full_document_texts=full_document_texts
+    )
+
+    # Log security event
+    log_security_event(
+        "comprehensive_analysis",
+        {
+            "vendor_id": vendor_id,
+            "vendor_name": vendor.get('name', 'Unknown'),
+            "documents_analyzed": len(documents),
+            "overall_risk_score": comprehensive_result.overall_risk_score,
+            "decision": comprehensive_result.decision.value,
+            "processing_time": comprehensive_result.processing_time_seconds,
+            "client_ip": request.client.host if request.client else "unknown"
+        }
+    )
+
+    return comprehensive_result

@@ -135,3 +135,41 @@ class AnalysisResult(BaseModel):
         if len(v) > 50:
             raise ValueError("Too many items in list (max 50)")
         return v
+
+class DecisionType(str, Enum):
+    GO = "Go"
+    CONDITIONAL = "Conditional"
+    NO_GO = "No-Go"
+
+class ComprehensiveAnalysisResult(BaseModel):
+    """Result from analyzing all vendor documents together"""
+    vendor_id: str
+    vendor_name: str
+    overall_risk_score: int = Field(..., ge=0, le=100)
+    overall_risk_level: RiskLevel
+    decision: DecisionType
+    decision_justification: str = Field(..., max_length=2000)
+
+    # Individual document summaries
+    documents_analyzed: int
+    individual_analyses: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Cross-document insights
+    consolidated_findings: List[str] = Field(default_factory=list)
+    cross_document_insights: List[str] = Field(default_factory=list)
+    contradictions: List[str] = Field(default_factory=list)
+
+    # Recommendations
+    recommendations: List[str] = Field(default_factory=list)
+
+    # Metadata
+    analysis_date: str
+    processing_time_seconds: Optional[float] = None
+
+    @field_validator('consolidated_findings', 'cross_document_insights', 'contradictions', 'recommendations')
+    @classmethod
+    def validate_list_length(cls, v: List[str]) -> List[str]:
+        """Limit lists to prevent abuse"""
+        if len(v) > 100:
+            raise ValueError("Too many items in list (max 100)")
+        return v

@@ -33,6 +33,23 @@ interface Document {
     recommendations?: string[];
 }
 
+interface ComprehensiveAnalysis {
+    vendor_id: string;
+    vendor_name: string;
+    overall_risk_score: number;
+    overall_risk_level: string;
+    decision: string;
+    decision_justification: string;
+    documents_analyzed: number;
+    individual_analyses: any[];
+    consolidated_findings: string[];
+    cross_document_insights: string[];
+    contradictions: string[];
+    recommendations: string[];
+    analysis_date: string;
+    processing_time_seconds?: number;
+}
+
 export default function VendorDetailsPage() {
     const params = useParams();
     const id = params.id as string;
@@ -42,6 +59,8 @@ export default function VendorDetailsPage() {
     const [uploading, setUploading] = useState(false);
     const [analyzingId, setAnalyzingId] = useState<string | null>(null);
     const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
+    const [comprehensiveAnalysis, setComprehensiveAnalysis] = useState<ComprehensiveAnalysis | null>(null);
+    const [analyzingAll, setAnalyzingAll] = useState(false);
 
     const fetchVendor = async () => {
         try {
@@ -152,6 +171,35 @@ export default function VendorDetailsPage() {
         }
     };
 
+    const handleAnalyzeAll = async () => {
+        if (documents.length === 0) {
+            alert("No documents to analyze. Please upload documents first.");
+            return;
+        }
+
+        setAnalyzingAll(true);
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const res = await fetch(`${apiUrl}/vendors/${id}/analyze-all`, {
+                method: 'POST'
+            });
+
+            if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.detail || 'Comprehensive analysis failed');
+            }
+
+            const result = await res.json();
+            setComprehensiveAnalysis(result);
+            alert(`Comprehensive analysis completed in ${result.processing_time_seconds?.toFixed(1)}s!`);
+        } catch (error) {
+            console.error("Comprehensive analysis failed", error);
+            alert(`Comprehensive analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+            setAnalyzingAll(false);
+        }
+    };
+
     if (loading) return <div className="p-8 text-slate-400">Loading vendor details...</div>;
     if (!vendor) return <div className="p-8 text-slate-400">Vendor not found.</div>;
 
@@ -191,7 +239,29 @@ export default function VendorDetailsPage() {
 
                     <Card>
                         <CardHeader>
-                            <CardTitle>Documents ({documents.length})</CardTitle>
+                            <div className="flex items-center justify-between">
+                                <CardTitle>Documents ({documents.length})</CardTitle>
+                                {documents.length > 0 && (
+                                    <Button
+                                        onClick={handleAnalyzeAll}
+                                        disabled={analyzingAll}
+                                        size="sm"
+                                        className="bg-gradient-to-r from-blue-600 to-violet-600"
+                                    >
+                                        {analyzingAll ? (
+                                            <>
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                Analyzing All...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <FileCheck className="mr-2 h-4 w-4" />
+                                                Analyze All Documents
+                                            </>
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
                         </CardHeader>
                         <CardContent>
                             {documents.length === 0 ? (
@@ -298,6 +368,119 @@ export default function VendorDetailsPage() {
                             )}
                         </CardContent>
                     </Card>
+
+                    {comprehensiveAnalysis && (
+                        <Card className="border-2 border-blue-500/30">
+                            <CardHeader>
+                                <div className="flex items-center justify-between">
+                                    <CardTitle>Comprehensive Risk Assessment</CardTitle>
+                                    <span className={`px-4 py-2 rounded-lg text-sm font-bold ${
+                                        comprehensiveAnalysis.decision === 'Go'
+                                            ? 'bg-green-500/20 text-green-400 border-2 border-green-500'
+                                            : comprehensiveAnalysis.decision === 'No-Go'
+                                            ? 'bg-red-500/20 text-red-400 border-2 border-red-500'
+                                            : 'bg-yellow-500/20 text-yellow-400 border-2 border-yellow-500'
+                                    }`}>
+                                        {comprehensiveAnalysis.decision}
+                                    </span>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="space-y-6">
+                                {/* Overall Risk Score */}
+                                <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h5 className="font-semibold">Overall Risk Score</h5>
+                                        <span className={`text-2xl font-bold ${
+                                            comprehensiveAnalysis.overall_risk_level === 'High'
+                                                ? 'text-red-400'
+                                                : comprehensiveAnalysis.overall_risk_level === 'Medium'
+                                                ? 'text-yellow-400'
+                                                : 'text-green-400'
+                                        }`}>
+                                            {comprehensiveAnalysis.overall_risk_score}/100
+                                        </span>
+                                    </div>
+                                    <div className="text-sm text-slate-400">
+                                        Risk Level: {comprehensiveAnalysis.overall_risk_level} | Documents Analyzed: {comprehensiveAnalysis.documents_analyzed}
+                                    </div>
+                                </div>
+
+                                {/* Decision Justification */}
+                                <div>
+                                    <h5 className="font-semibold mb-2">Decision Justification</h5>
+                                    <p className="text-sm text-slate-300 leading-relaxed">
+                                        {comprehensiveAnalysis.decision_justification}
+                                    </p>
+                                </div>
+
+                                {/* Consolidated Findings */}
+                                {comprehensiveAnalysis.consolidated_findings.length > 0 && (
+                                    <div>
+                                        <h5 className="font-semibold mb-2">Consolidated Findings</h5>
+                                        <ul className="space-y-2">
+                                            {comprehensiveAnalysis.consolidated_findings.map((finding, i) => (
+                                                <li key={i} className="flex items-start gap-2 text-sm">
+                                                    <ShieldAlert className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                                                    <span>{finding}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Cross-Document Insights */}
+                                {comprehensiveAnalysis.cross_document_insights.length > 0 && (
+                                    <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                                        <h5 className="font-semibold mb-2 text-blue-400">Cross-Document Insights</h5>
+                                        <ul className="space-y-2">
+                                            {comprehensiveAnalysis.cross_document_insights.map((insight, i) => (
+                                                <li key={i} className="flex items-start gap-2 text-sm">
+                                                    <CheckCircle className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
+                                                    <span>{insight}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Contradictions */}
+                                {comprehensiveAnalysis.contradictions.length > 0 && (
+                                    <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                                        <h5 className="font-semibold mb-2 text-red-400">Contradictions Found</h5>
+                                        <ul className="space-y-2">
+                                            {comprehensiveAnalysis.contradictions.map((contradiction, i) => (
+                                                <li key={i} className="flex items-start gap-2 text-sm">
+                                                    <ShieldAlert className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
+                                                    <span>{contradiction}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {/* Recommendations */}
+                                {comprehensiveAnalysis.recommendations.length > 0 && (
+                                    <div>
+                                        <h5 className="font-semibold mb-2">Recommendations</h5>
+                                        <ol className="space-y-2 list-decimal list-inside">
+                                            {comprehensiveAnalysis.recommendations.map((rec, i) => (
+                                                <li key={i} className="text-sm text-slate-300">
+                                                    {rec}
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                )}
+
+                                {/* Metadata */}
+                                <div className="pt-4 border-t border-slate-700 text-xs text-slate-400">
+                                    Analysis completed in {comprehensiveAnalysis.processing_time_seconds?.toFixed(2)}s
+                                    {' • '}
+                                    {new Date(comprehensiveAnalysis.analysis_date).toLocaleString()}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
                 </div>
 
                 <div className="space-y-6">

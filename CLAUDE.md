@@ -947,4 +947,155 @@ npm install @radix-ui/react-dialog @radix-ui/react-tabs
 
 This roadmap transforms the TPRM application from a document analysis tool into a comprehensive, AI-powered vendor risk management platform with autonomous decision-making capabilities.
 - remember to create a version update and a release notes for each feature update
-- security hardening at every version change is mandaroty
+- security hardening at every version change is mandatory
+
+---
+
+## Development Session Summary (2025-11-21) - v1.2.0
+
+### Session Overview
+Implemented v1.2.0 Combined Multi-Document Analysis, enabling comprehensive vendor risk assessments through AI-powered cross-document synthesis, contradiction detection, and data-driven Go/No-Go/Conditional decisions.
+
+### Key Accomplishments
+
+#### 1. Combined Multi-Document Analysis Feature
+**Endpoint**: `POST /vendors/{vendor_id}/analyze-all`
+
+Comprehensive cross-document synthesis:
+- Analyzes all vendor documents together for holistic risk assessment
+- Detects contradictions between documents (e.g., ISO cert vs. pentest findings)
+- Provides consolidated findings across all documents
+- Generates cross-document insights through AI synthesis
+- Makes Go/No-Go/Conditional decisions with clear justification
+
+**Decision Framework**:
+- **Go**: Risk score < 40 OR (score < 60 AND all critical risks mitigated)
+- **Conditional**: Score 40-70 with specific remediations required
+- **No-Go**: Score > 70 OR critical unmitigated risks found
+
+**Rate Limiting**: 3 analyses per hour (computationally expensive)
+**Performance**: 27.92 seconds for 3 documents (target: <30s for 5)
+
+#### 2. Enhanced Data Models
+**New Models** (backend/app/models.py):
+- `DecisionType` enum: Go, Conditional, No-Go
+- `ComprehensiveAnalysisResult` model: Complete structure for comprehensive analysis results
+  - vendor_id, vendor_name
+  - overall_risk_score, overall_risk_level
+  - decision, decision_justification
+  - documents_analyzed, individual_analyses
+  - consolidated_findings, cross_document_insights, contradictions
+  - recommendations, analysis_date, processing_time_seconds
+
+#### 3. Advanced AI Service Enhancements
+**New Method** (backend/app/services/ai_service.py:103-271):
+```python
+async def analyze_all_documents(
+    vendor_id, vendor_name, individual_analyses, full_document_texts
+) -> ComprehensiveAnalysisResult
+```
+
+Features:
+- Prepares document summaries for AI
+- Truncates full texts to first 2000 chars (token limit management)
+- Sends comprehensive prompt to Gemini 2.5 Flash
+- Validates and sanitizes all AI outputs with PromptInjectionDetector
+- Graceful fallback with aggregated risk scores on AI errors
+
+#### 4. Frontend UI Implementation
+**Updated** frontend/src/app/vendors/[id]/page.tsx:
+- Added `ComprehensiveAnalysis` interface
+- "Analyze All Documents" button in CardHeader
+- Comprehensive analysis results card with:
+  - Color-coded decision badges (Green/Yellow/Red for Go/Conditional/No-Go)
+  - Overall risk score and level
+  - Decision justification
+  - Documents analyzed count
+  - Consolidated findings list
+  - Cross-document insights list
+  - Detected contradictions (yellow highlight)
+  - Prioritized recommendations
+  - Processing time display
+- Loading state: "Analyzing All Documents..."
+
+### Testing Results
+
+**Test Scenario**: LoopUp Vendor with 3 Documents
+1. ISO Certificate (Risk: Low - 25/100)
+2. Penetration Test (Risk: High - 100/100)
+3. ISMS Policy (Risk: High - 80/100)
+
+**Comprehensive Analysis Result**:
+- Overall Risk Score: 85/100 (High)
+- Decision: **No-Go**
+- Processing Time: 27.92 seconds
+- Documents Analyzed: 3
+
+**Key Insights Detected**:
+- Future-dated penetration test report (authenticity concerns)
+- Contradiction: ISO 27001:2022 certificate vs. ISMS policy referencing 2013 standard
+- Critical vulnerabilities: Unencrypted communications, outdated software
+- Missing critical documents: Statement of Applicability, Risk Assessment, Incident Policy
+- Gap between certification claims and practical implementation
+
+### Bugs Fixed
+
+#### Bug 1: Dictionary Access AttributeError
+**Issue**: `AttributeError: 'dict' object has no attribute 'id'` when accessing vendor
+
+**Root Cause**: `AirtableService.get_vendors()` returns dictionaries, not Vendor objects
+
+**Fix** (backend/app/main.py):
+- Line 296: Changed `v.id` to `v.get('id')`
+- Line 382: Changed `vendor.name` to `vendor.get('name', 'Unknown')`
+- Line 392: Changed `vendor.name` to `vendor.get('name', 'Unknown')`
+
+**Impact**: Comprehensive analysis endpoint now works correctly with Airtable dictionaries
+
+### Security Enhancements
+
+#### 1. Rate Limiting
+- Endpoint: `POST /vendors/{vendor_id}/analyze-all`
+- Limit: 3 requests per hour per IP
+- Tool: slowapi with @limiter.limit("3/hour")
+
+#### 2. Input Sanitization
+- All AI-generated findings validated with `PromptInjectionDetector.validate_findings()`
+- Risk scores clamped to 0-100 range
+- Decision justification limited to 2000 characters
+- List lengths validated (max 100 items per list)
+
+#### 3. Audit Logging
+- Security event: "comprehensive_analysis"
+- Logged data: vendor_id, vendor_name, documents_analyzed, overall_risk_score, decision, processing_time, client_ip
+
+### Version Update
+- Updated `backend/app/config.py:17` from `APP_VERSION = "1.1.0"` to `APP_VERSION = "1.2.0"`
+- Created `RELEASE_NOTES_v1.2.0.md` with comprehensive documentation
+- Updated `BACKLOG.md` to mark v1.2.0 as completed
+
+### Current Application State (v1.2.0)
+- ✅ Multi-file document upload with unique URLs (v1.0.0)
+- ✅ Real Gemini AI analysis with structured output (v1.0.0)
+- ✅ Airtable integration (Vendors + Documents tables) (v1.0.0)
+- ✅ Separate upload/analyze workflow (v1.0.0)
+- ✅ Frontend with real-time status updates (v1.0.0)
+- ✅ Document download capability (v1.0.0)
+- ✅ Risk scoring and findings display (v1.0.0)
+- ✅ Comprehensive error handling (v1.0.0)
+- ✅ Security hardening (v1.1.0)
+- ✅ **NEW: Combined multi-document analysis (v1.2.0)**
+- ✅ **NEW: Cross-document contradiction detection (v1.2.0)**
+- ✅ **NEW: Go/No-Go/Conditional decision framework (v1.2.0)**
+- ✅ **NEW: AI-powered cross-document synthesis (v1.2.0)**
+
+### Git Repository Updates
+**Pending commit** for v1.2.0:
+- backend/app/config.py (version bump)
+- backend/app/models.py (new models)
+- backend/app/services/ai_service.py (new method)
+- backend/app/main.py (new endpoint + bug fixes)
+- frontend/src/app/vendors/[id]/page.tsx (UI enhancements)
+- RELEASE_NOTES_v1.2.0.md (new file)
+- BACKLOG.md (updated)
+- CLAUDE.md (this section)
