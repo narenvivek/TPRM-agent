@@ -1,5 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from typing import List
@@ -10,21 +12,54 @@ from app.services.ai_service import AIService
 from app.services.document_service import DocumentService
 from app.services.storage_service import get_storage_service
 from app.services.document_airtable_service import DocumentAirtableService
+from app.security.file_validation import FileValidator
+from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
+from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.audit_logging import AuditLoggingMiddleware, log_security_event
+from app.config import settings
+from slowapi.errors import RateLimitExceeded
 import os
 
-app = FastAPI(title="TPRM Agent API", version="0.1.0")
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    docs_url="/docs" if not settings.is_production else None,  # Disable docs in production
+    redoc_url="/redoc" if not settings.is_production else None
+)
 
-# Configure CORS
+# Add rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+# Add audit logging middleware (first, to log all requests)
+if settings.AUDIT_LOG_ENABLED:
+    app.add_middleware(AuditLoggingMiddleware)
+
+# Add security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
+
+# HTTPS redirect in production
+if settings.is_production:
+    app.add_middleware(HTTPSRedirectMiddleware)
+
+# Configure CORS with restricted origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,  # Use configured origins, not "*"
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+    max_age=600,  # Cache preflight requests for 10 minutes
+)
+
+# Trusted host middleware
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"] if not settings.is_production else settings.cors_origins
 )
 
 # Create uploads directory
-UPLOAD_DIR = Path(os.getenv("STORAGE_PATH", "./uploads"))
+UPLOAD_DIR = Path(settings.STORAGE_PATH)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Dependency Injection
@@ -69,7 +104,9 @@ async def analyze_document(
     return analysis
 
 @app.post("/vendors/{vendor_id}/documents/upload")
+@limiter.limit("10/hour")  # Max 10 uploads per hour per IP
 async def upload_documents(
+    request: Request,
     vendor_id: str,
     files: List[UploadFile] = File(...),
     document_type: str = Form("General"),
@@ -78,39 +115,57 @@ async def upload_documents(
     """
     Upload one or more documents for a vendor (stores files, creates metadata records)
     Analysis is performed separately via /documents/{document_id}/analyze
+    Includes security: MIME type validation, file size limits, malware protection
+    Rate limit: 10 uploads per hour
     """
+    # Validate vendor_id
+    if not vendor_id.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid vendor ID")
+
+    # Limit number of simultaneous uploads
+    if len(files) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 10 files per upload request"
+        )
+
     storage = get_storage_service()
     uploaded_documents = []
+    validator = FileValidator()
 
     for file in files:
-        # Validate file type
-        file_ext = Path(file.filename).suffix.lower()
-        if file_ext not in ['.pdf', '.docx', '.txt']:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {file_ext}. Supported: .pdf, .docx, .txt"
-            )
+        # Comprehensive file validation (MIME type, size, extension matching)
+        contents, file_ext = await validator.validate_upload(file)
+
+        # Sanitize filename
+        safe_filename = validator.sanitize_filename(file.filename)
 
         # Save file to storage
         file_path, file_url = await storage.save_file(file, vendor_id)
 
-        # Get file size
-        file.file.seek(0, 2)  # Seek to end
-        file_size = file.file.tell()
-        file.file.seek(0)  # Reset
-
         # Create document record in Airtable
         document_data = {
             "vendor_id": vendor_id,
-            "filename": file.filename,
+            "filename": safe_filename,
             "file_type": file_ext[1:],  # Remove the dot
             "document_type": document_type,
-            "file_size": file_size,
+            "file_size": len(contents),
             "file_url": file_url
         }
 
         document_record = doc_service.create_document(document_data)
         uploaded_documents.append(document_record)
+
+    # Log security event
+    log_security_event(
+        "file_upload",
+        {
+            "vendor_id": vendor_id,
+            "file_count": len(uploaded_documents),
+            "client_ip": request.client.host if request.client else "unknown",
+            "document_types": list(set([doc.get("file_type") for doc in uploaded_documents]))
+        }
+    )
 
     return {
         "message": f"Successfully uploaded {len(uploaded_documents)} document(s)",
@@ -129,13 +184,16 @@ async def get_vendor_documents(
     return documents
 
 @app.post("/documents/{document_id}/analyze", response_model=AnalysisResult)
+@limiter.limit("5/minute")  # Max 5 AI analyses per minute per IP
 async def analyze_document(
+    request: Request,
     document_id: str,
     doc_service: DocumentAirtableService = Depends(get_document_service),
     ai_service: AIService = Depends(get_ai_service)
 ):
     """
     Analyze a previously uploaded document using AI
+    Rate limit: 5 analyses per minute to prevent API abuse
     """
     # Get document metadata
     document = doc_service.get_document(document_id)
@@ -186,11 +244,27 @@ async def analyze_document(
 @app.get("/files/{vendor_id}/{filename}")
 async def serve_file(vendor_id: str, filename: str):
     """
-    Serve uploaded files
+    Serve uploaded files with path traversal protection
     """
-    file_path = UPLOAD_DIR / vendor_id / filename
+    # Validate vendor_id (alphanumeric only)
+    if not vendor_id.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid vendor ID")
 
-    if not file_path.exists():
+    # Validate filename (no path separators or parent directory references)
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Construct path safely
+    file_path = (UPLOAD_DIR / vendor_id / filename).resolve()
+
+    # Ensure file is within upload directory (prevent path traversal)
+    try:
+        file_path.relative_to(UPLOAD_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Check file exists and is a file (not a directory)
+    if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(file_path)

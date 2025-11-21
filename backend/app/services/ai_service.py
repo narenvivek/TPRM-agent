@@ -3,6 +3,7 @@ import json
 import google.generativeai as genai
 from dotenv import load_dotenv
 from app.models import AnalysisResult
+from app.security.prompt_injection import PromptInjectionDetector
 
 load_dotenv()
 
@@ -17,6 +18,8 @@ class AIService:
             self.model = None
 
     async def analyze_text(self, text: str) -> AnalysisResult:
+        # Sanitize input to prevent prompt injection
+        text = PromptInjectionDetector.sanitize_text(text)
         if not self.model:
             # Mock Analysis Result
             return AnalysisResult(
@@ -73,12 +76,16 @@ Respond ONLY with valid JSON, no additional text."""
             # Parse JSON response
             parsed = json.loads(result_text)
 
+            # Validate findings for prompt injection
+            findings = PromptInjectionDetector.validate_findings(parsed.get("findings", []))
+            recommendations = PromptInjectionDetector.validate_findings(parsed.get("recommendations", []))
+
             # Validate and construct result
             return AnalysisResult(
                 risk_score=min(100, max(0, int(parsed.get("risk_score", 50)))),
                 risk_level=parsed.get("risk_level", "Medium"),
-                findings=parsed.get("findings", []),
-                recommendations=parsed.get("recommendations", [])
+                findings=findings,
+                recommendations=recommendations
             )
 
         except Exception as e:

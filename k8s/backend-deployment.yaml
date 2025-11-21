@@ -1,0 +1,175 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tprm-backend
+  namespace: tprm-agent
+  labels:
+    app: tprm-backend
+    version: v1.1.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: tprm-backend
+  template:
+    metadata:
+      labels:
+        app: tprm-backend
+        version: v1.1.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tprm-backend-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: backend
+        image: your-registry/tprm-backend:v1.1.0
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: tprm-backend-config
+              key: ENVIRONMENT
+        - name: ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: tprm-backend-config
+              key: ALLOWED_ORIGINS
+        - name: STORAGE_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: tprm-backend-config
+              key: STORAGE_PATH
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: tprm-backend-config
+              key: LOG_LEVEL
+        - name: AIRTABLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tprm-backend-secrets
+              key: AIRTABLE_API_KEY
+        - name: AIRTABLE_BASE_ID
+          valueFrom:
+            secretKeyRef:
+              name: tprm-backend-secrets
+              key: AIRTABLE_BASE_ID
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tprm-backend-secrets
+              key: GEMINI_API_KEY
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tprm-backend-secrets
+              key: SECRET_KEY
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        - name: logs
+          mountPath: /app/logs
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: tprm-backend-uploads-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: tprm-backend-logs-pvc
+      - name: tmp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - tprm-backend
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tprm-backend-sa
+  namespace: tprm-agent
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tprm-backend-uploads-pvc
+  namespace: tprm-agent
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tprm-backend-logs-pvc
+  namespace: tprm-agent
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
