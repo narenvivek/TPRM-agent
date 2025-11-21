@@ -194,8 +194,6 @@ export default function VendorDetailsPage() {
 
             // Refresh vendor data to update dashboard with new risk score
             await fetchVendor();
-
-            alert(`Comprehensive analysis completed in ${result.processing_time_seconds?.toFixed(1)}s!`);
         } catch (error) {
             console.error("Comprehensive analysis failed", error);
             alert(`Comprehensive analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
