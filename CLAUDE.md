@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TPRM-agent is a Third-Party Risk Management (TPRM) system that helps organizations assess and manage vendor risks. The application consists of a FastAPI backend and a Next.js frontend, with Airtable as the data store and Google Gemini AI for document analysis.
+TPRM-agent is a production-ready Third-Party Risk Management (TPRM) system that helps organizations assess and manage vendor risks. The application consists of a FastAPI backend and a Next.js frontend, with Airtable as the data store and Google Gemini AI for document analysis.
+
+**Current Version**: v1.1.0 (Security Hardened)
+**Status**: Production-ready with comprehensive security controls
 
 ## Architecture
 
@@ -12,20 +15,46 @@ TPRM-agent is a Third-Party Risk Management (TPRM) system that helps organizatio
 - **Location**: `./backend/`
 - **Entry point**: `backend/app/main.py`
 - **Framework**: FastAPI with async/await support
-- **Dependencies**: FastAPI, uvicorn, pyairtable, pydantic, google-generativeai, python-dotenv, httpx
+- **Dependencies**: FastAPI, uvicorn, pyairtable, pydantic, pydantic-settings, google-generativeai, python-dotenv, httpx, slowapi, python-magic
 
 **Key Components**:
-- `app/main.py` - FastAPI application with CORS middleware, dependency injection for services, and API endpoints
-- `app/models.py` - Pydantic models for request/response validation (Vendor, VendorCreate, AnalysisRequest, AnalysisResult)
-- `app/services/airtable_service.py` - Airtable integration with fallback to mock data when credentials are unavailable
-- `app/services/ai_service.py` - Google Gemini AI integration for risk analysis with mock fallback
+- `app/main.py` - FastAPI application with security middleware stack, CORS, rate limiting, and API endpoints
+- `app/config.py` - Centralized configuration management with Pydantic settings (environment-based)
+- `app/models.py` - Pydantic models with validation, enums, and security constraints
+- `app/services/airtable_service.py` - Airtable integration with fallback to mock data
+- `app/services/ai_service.py` - Google Gemini AI integration (gemini-2.5-flash) with prompt injection protection
+- `app/services/document_service.py` - Document text extraction (PDF, DOCX, TXT)
+- `app/services/storage_service.py` - Abstract storage interface (local/cloud)
+- `app/services/document_airtable_service.py` - Document metadata tracking in Airtable
+
+**Security Components** (v1.1.0):
+- `app/security/file_validation.py` - File upload validation (MIME type, size, extension matching)
+- `app/security/prompt_injection.py` - AI prompt injection detection and sanitization
+- `app/middleware/rate_limit.py` - Rate limiting (10 uploads/hour, 5 AI analyses/minute)
+- `app/middleware/security_headers.py` - HTTP security headers (CSP, HSTS, X-Frame-Options, etc.)
+- `app/middleware/audit_logging.py` - Structured JSON audit logging for security events
 
 **API Endpoints**:
 - `GET /` - Health check
 - `GET /health` - Detailed health status
 - `GET /vendors` - List all vendors
 - `POST /vendors` - Create new vendor
-- `POST /analysis` - Analyze vendor documents using AI
+- `POST /vendors/{vendor_id}/documents/upload` - Upload documents (rate limited: 10/hour)
+- `GET /vendors/{vendor_id}/documents` - Get vendor documents
+- `POST /documents/{document_id}/analyze` - AI analysis (rate limited: 5/minute)
+- `GET /files/{vendor_id}/{filename}` - Serve uploaded files (path traversal protected)
+- `POST /analysis` - Legacy direct text analysis (deprecated)
+
+**Security Features**:
+- Rate limiting on upload and AI endpoints
+- MIME type validation with python-magic
+- File size limits (10MB default, configurable)
+- Path traversal protection on file serving
+- Prompt injection detection for AI inputs
+- Comprehensive security headers (CSP, HSTS, etc.)
+- Audit logging for sensitive operations
+- CORS restricted to configured origins only
+- Input validation with Pydantic enums
 
 ### Frontend (Next.js)
 - **Location**: `./frontend/`
@@ -46,14 +75,26 @@ TPRM-agent is a Third-Party Risk Management (TPRM) system that helps organizatio
 ```bash
 cd backend
 
+# Create virtual environment (recommended: use uv)
+uv venv
+source .venv/bin/activate  # Linux/Mac
+# .venv\Scripts\activate   # Windows
+
 # Install dependencies
-pip install -r requirements.txt
+uv pip install -r requirements.txt
+# OR: pip install -r requirements.txt
+
+# Configure environment (copy .env.example to .env and fill in values)
+cp .env.example .env
 
 # Run development server (default port 8000)
 uvicorn app.main:app --reload --host 0.0.0.0
 
 # Run tests
 pytest test_api.py
+
+# Check Python version (requires 3.12+)
+python --version
 ```
 
 ### Frontend
@@ -62,6 +103,9 @@ cd frontend
 
 # Install dependencies
 npm install
+
+# Configure environment (create .env.local with API URL)
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 
 # Run development server (default port 3000)
 npm run dev
@@ -76,18 +120,74 @@ npm start
 npm run lint
 ```
 
+### Docker (Production)
+```bash
+# Build and run with docker-compose (includes both frontend and backend)
+docker-compose up --build
+
+# Run in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop containers
+docker-compose down
+```
+
+### Kubernetes (Production)
+```bash
+# Deploy to Kubernetes cluster
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/secrets.yaml  # After editing with real credentials
+kubectl apply -f k8s/
+kubectl apply -f k8s/cert-manager/  # For TLS certificates
+
+# Check deployment status
+kubectl get pods -n tprm-agent
+kubectl get services -n tprm-agent
+kubectl get ingress -n tprm-agent
+
+# View logs
+kubectl logs -f deployment/backend -n tprm-agent
+kubectl logs -f deployment/frontend -n tprm-agent
+
+# See k8s/README.md for detailed deployment instructions
+```
+
 ## Environment Configuration
 
 ### Backend (.env in backend/)
-Required environment variables:
-- `AIRTABLE_API_KEY` - Personal Access Token from Airtable (requires scopes: data.records:read, data.records:write, schema.bases:read)
+See `backend/.env.example` for complete configuration template.
+
+**Required Variables**:
+- `AIRTABLE_API_KEY` - Personal Access Token from Airtable (scopes: data.records:read, data.records:write, schema.bases:read)
 - `AIRTABLE_BASE_ID` - Airtable Base ID (starts with 'app')
 - `GEMINI_API_KEY` - Google Gemini API key from AI Studio
 
-**Note**: Services gracefully degrade to mock mode if credentials are missing.
+**Configuration Variables** (v1.1.0):
+- `APP_VERSION` - Application version (default: 1.1.0)
+- `ENVIRONMENT` - Environment mode: development, staging, production
+- `DEBUG` - Debug mode (default: False)
+- `SECRET_KEY` - Secret key for security (CHANGE IN PRODUCTION!)
+- `ALLOWED_ORIGINS` - Comma-separated CORS origins (default: http://localhost:3000)
+- `STORAGE_TYPE` - Storage backend: local, gcs (default: local)
+- `STORAGE_PATH` - Local storage path (default: ./uploads)
+- `MAX_FILE_SIZE` - Max upload size in bytes (default: 10485760 = 10MB)
+- `RATE_LIMIT_ENABLED` - Enable rate limiting (default: true)
+- `LOG_LEVEL` - Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- `AUDIT_LOG_ENABLED` - Enable audit logging (default: true)
 
-### Frontend
-- `NEXT_PUBLIC_API_URL` - Backend API URL (defaults to `http://100.64.185.83:8000` if not set)
+**Production Security**:
+- Set `ENVIRONMENT=production` to enable HTTPS redirect and disable API docs
+- Use strong `SECRET_KEY` (generate with: `openssl rand -hex 32`)
+- Configure explicit `ALLOWED_ORIGINS` (never use wildcard *)
+- Enable `RATE_LIMIT_ENABLED=true` and `AUDIT_LOG_ENABLED=true`
+
+**Note**: Services gracefully degrade to mock mode if Airtable/Gemini credentials are missing.
+
+### Frontend (.env.local in frontend/)
+- `NEXT_PUBLIC_API_URL` - Backend API URL (default: http://localhost:8000)
 
 ## Data Models
 
@@ -847,3 +947,4 @@ npm install @radix-ui/react-dialog @radix-ui/react-tabs
 
 This roadmap transforms the TPRM application from a document analysis tool into a comprehensive, AI-powered vendor risk management platform with autonomous decision-making capabilities.
 - remember to create a version update and a release notes for each feature update
+- security hardening at every version change is mandaroty
