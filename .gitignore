@@ -12,6 +12,7 @@ backend/**/__pycache__/
 *.so
 .Python
 backend/uploads/
+backend/assessments/
 *.log
 
 # Node.js

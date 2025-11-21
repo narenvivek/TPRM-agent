@@ -12,6 +12,7 @@ from app.services.ai_service import AIService
 from app.services.document_service import DocumentService
 from app.services.storage_service import get_storage_service
 from app.services.document_airtable_service import DocumentAirtableService
+from app.services.assessment_storage_service import AssessmentStorageService
 from app.security.file_validation import FileValidator
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from app.middleware.security_headers import SecurityHeadersMiddleware
@@ -71,6 +72,9 @@ def get_ai_service():
 
 def get_document_service():
     return DocumentAirtableService()
+
+def get_assessment_storage():
+    return AssessmentStorageService()
 
 @app.get("/")
 async def root():
@@ -276,7 +280,8 @@ async def analyze_all_vendor_documents(
     vendor_id: str,
     airtable_service: AirtableService = Depends(get_airtable_service),
     doc_service: DocumentAirtableService = Depends(get_document_service),
-    ai_service: AIService = Depends(get_ai_service)
+    ai_service: AIService = Depends(get_ai_service),
+    assessment_storage: AssessmentStorageService = Depends(get_assessment_storage)
 ):
     """
     Perform comprehensive cross-document analysis for all vendor documents
@@ -390,6 +395,9 @@ async def analyze_all_vendor_documents(
         risk_score=comprehensive_result.overall_risk_score,
         risk_level=comprehensive_result.overall_risk_level.value
     )
+
+    # Save complete assessment to JSON file
+    assessment_storage.save_assessment(comprehensive_result)
 
     # Log security event
     log_security_event(
